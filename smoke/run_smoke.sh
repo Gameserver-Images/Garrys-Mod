@@ -310,6 +310,7 @@ test_entry() {
 [ -t 0 ] && [ -t 1 ] || { echo "the console is not a terminal"; exit 3; }
 printf '%s\n' "\$@" > "\${HOMEDIR}/args"
 echo "Loading map gm_construct"
+printf '\\e[38;2;156;241;255mcoloured\\e[39m\\e[38;2;156;241;255m\\n'
 touch "\${HOMEDIR}/listening"
 while IFS= read -r line; do
   case "\${line}" in
@@ -333,6 +334,7 @@ EOF
   sleep 0.2
   expect_line "${WORK}/entry.log" "Server: listed 9 console variables for list-env and the CVAR_ checks"
   grep -q 'hostname \| total convars\|^cvar list\|^---' "${WORK}/entry.log" && fail "the cvar list went to the log"
+  expect_line "${WORK}/entry.log" "coloured"
   bash "${WORK}/scripts/console.sh" lua_run 'print("a b")' > /dev/null || fail "console failed"
   sleep 0.2
   expect_line "${WORK}/entry.log" 'command: lua_run print("a b")'

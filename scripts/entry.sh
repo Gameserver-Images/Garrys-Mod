@@ -61,13 +61,16 @@ shutdown_server() {
   echo "*** INFO: Server stopped with exit code ${SHUTDOWN_EXIT} ***"
 }
 
-# Output passes through this loop. It saves the output of `cvarlist` to CVARLIST instead of the log.
-# It's a child of this shell, so the last lines are waited for before the container exits.
+# Output passes through this loop. It drops the terminal's colour codes and saves the output of
+# `cvarlist` to CVARLIST instead of the log. It's a child of this shell, so the last lines are waited
+# for before the container exits.
 exec {LOG_FD}> >(
   trap '' TERM INT
+  shopt -s extglob
   capturing=false
   while IFS= read -r line || [ -n "${line}" ]; do
     line="${line%$'\r'}"
+    line="${line//$'\e['*([0-9;?])[A-Za-z]/}"
     if [ "${capturing}" = true ]; then
       if [[ "${line}" == *"total convars/concommands"* ]]; then
         capturing=false
