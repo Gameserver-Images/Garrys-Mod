@@ -1,0 +1,289 @@
+name: Build and Publish Docker Image
+
+# Pull requests and pushes run the tests. A push to main whose commits call for a new version
+# (ci/next_release.sh) builds the image, boots it on every Steam branch of the game and publishes it
+# under that version once it boots on the stable game. The image holds no game, so every 6 hours the
+# newest release is booted on each branch whose Steam build is new to it. Every boot test that
+# passes uploads the env reference for its game build as an artifact, which also marks that build
+# tested, and adds it to the docs site once the repository is public.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'scripts/**'
+      - 'smoke/**'
+      - 'ci/**'
+      - 'site/**'
+      - 'Dockerfile'
+      - '.github/workflows/docker-image.yml'
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - 'smoke/**'
+      - 'ci/**'
+      - 'site/**'
+      - 'Dockerfile'
+      - '.github/workflows/docker-image.yml'
+  schedule:
+    - cron: "17 6,12,18 * * *" # every 6 hours
+    - cron: "17 0 * * *" # daily, which also retries builds that failed
+  workflow_dispatch:
+
+# Pull request runs replace each other. Pushes queue, since each may release a version, and the
+# checks queue apart from them, so a check never cancels a release.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.event_name == 'push' && 'release' || 'check' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Scheduled checks boot the published release, so the scripts' tests don't need to run for them.
+  test:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Lint scripts
+        run: shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh smoke/*.sh ci/*.sh
+
+      - name: Run smoke tests
+        run: bash smoke/run_smoke.sh
+
+  prepare:
+    needs: test
+    if: always() && github.event_name != 'pull_request' && contains(fromJSON('["success", "skipped"]'), needs.test.result)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has_tests: ${{ steps.plan.outputs.has_tests }}
+      release: ${{ steps.plan.outputs.release }}
+      publish: ${{ steps.plan.outputs.publish }}
+      notes: ${{ steps.plan.outputs.notes }}
+      public: ${{ steps.plan.outputs.public }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Decide what to test
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RETRY_FAILED: ${{ github.event.schedule != '17 6,12,18 * * *' }}
+        run: |
+          set -euo pipefail
+          version=""
+          if [ "${GITHUB_EVENT_NAME}" = push ]; then
+            version="$(bash ci/next_release.sh "${RUNNER_TEMP}/notes.md")"
+          fi
+          release="${version}"
+          if [ -z "${release}" ]; then
+            release="$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n 1)"
+            release="${release#v}"
+          fi
+
+          # A new version is tested on every branch, the newest release on branches without a
+          # reference made with it. Scheduled runs other than the daily one skip a build that already
+          # failed with that release.
+          branches="$(bash ci/game_branches.sh)"
+          failed="$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=boot-failed-&per_page=100" --jq '.actions_caches[].key')"
+          tests=()
+          while read -r branch build; do
+            [ -n "${release}" ] || break
+            marked=false
+            grep -qxF "boot-failed-${branch}-${build}-${release}" <<< "${failed}" && marked=true
+            if [ -z "${version}" ]; then
+              tested="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?name=env-${branch}-${build}-${release}" --jq '[.artifacts[] | select(.expired | not)] | length')"
+              [ "${tested}" -gt 0 ] && continue
+              if [ "${marked}" = true ] && [ "${RETRY_FAILED}" = false ]; then
+                echo "Skipping ${branch} build ${build}: it failed with ${release} before, the daily run retries it"
+                continue
+              fi
+            fi
+            tests+=("$(jq -n -c --arg branch "${branch}" --arg build "${build}" --argjson marked "${marked}" '{$branch, $build, $marked}')")
+          done <<< "${branches}"
+
+          echo "Steam builds: $(paste -sd ' ' <<< "${branches}"); new version: ${version:-none}; release tested: ${release:-none}"
+          echo "Testing: $(printf '%s\n' "${tests[@]}" | jq -r -s 'map(.branch) | join(" ")')"
+          {
+            echo "matrix=$(printf '%s\n' "${tests[@]}" | jq -s -c .)"
+            echo "has_tests=$([ "${#tests[@]}" -gt 0 ] && echo true || echo false)"
+            echo "release=${release}"
+            echo "publish=$([ -n "${version}" ] && echo true || echo false)"
+            echo "public=$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.private | not')"
+            if [ -n "${version}" ]; then
+              delimiter="notes-$(openssl rand -hex 8)"
+              echo "notes<<${delimiter}"
+              cat "${RUNNER_TEMP}/notes.md"
+              echo "${delimiter}"
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Boot test on ${{ matrix.branch }}
+    needs: prepare
+    if: always() && needs.prepare.result == 'success' && needs.prepare.outputs.has_tests == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    env:
+      LOCAL_IMAGE: gmod-server:candidate
+      RELEASE: ${{ needs.prepare.outputs.release }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        if: needs.prepare.outputs.publish == 'true'
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        if: needs.prepare.outputs.publish == 'true'
+        run: |
+          docker buildx build \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --label org.opencontainers.image.revision="${GITHUB_SHA}" \
+            --label org.opencontainers.image.version="${RELEASE}" \
+            --tag "${LOCAL_IMAGE}" \
+            --load \
+            .
+
+      - name: Pull the release
+        if: needs.prepare.outputs.publish != 'true'
+        run: |
+          docker pull "ghcr.io/${GITHUB_REPOSITORY,,}:${RELEASE}"
+          docker tag "ghcr.io/${GITHUB_REPOSITORY,,}:${RELEASE}" "${LOCAL_IMAGE}"
+
+      - name: Boot test
+        id: boot
+        run: bash ci/boot_test.sh "${LOCAL_IMAGE}" "${{ matrix.branch }}" out
+
+      # A game update can change the install layout or the libraries the server needs.
+      - name: Show the game install
+        if: failure() && steps.boot.outcome == 'failure'
+        run: |
+          docker run --rm -v gmod-boot-server:/home/steam/gmod-dedicated --entrypoint bash "${LOCAL_IMAGE}" -c '
+            id; echo "STEAMAPPDIR=${STEAMAPPDIR}"
+            cd "${STEAMAPPDIR}" || exit 0
+            ls -la . garrysmod steamapps mounts 2>&1
+            echo "Libraries the server binaries can not find:"
+            ldd srcds_linux srcds_linux64 bin/*.so bin/*/*.so garrysmod/bin/*.so garrysmod/bin/*/*.so 2>/dev/null | grep "not found" | sort -u'
+
+      # The cache entry only marks the failure for the next runs; its content doesn't matter.
+      - name: Mark the failed build
+        if: failure() && steps.boot.outcome == 'failure' && !matrix.marked
+        run: mkdir -p boot-failed && echo "${GITHUB_RUN_ID}" > boot-failed/run
+
+      - name: Save the failure mark
+        if: failure() && steps.boot.outcome == 'failure' && !matrix.marked
+        uses: actions/cache/save@v6
+        with:
+          path: boot-failed
+          key: boot-failed-${{ matrix.branch }}-${{ matrix.build }}-${{ needs.prepare.outputs.release }}
+
+      - name: Publish the release
+        if: needs.prepare.outputs.publish == 'true' && matrix.branch == 'public'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ needs.prepare.outputs.notes }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          IFS=. read -r major minor _ <<< "${RELEASE}"
+          tags=("${RELEASE}" "${major}.${minor}" latest)
+          # Before 1.0.0, 0.Y is the line without breaking changes, so there's no 0 tag.
+          [ "${major}" = 0 ] || tags+=("${major}")
+          for tag in "${tags[@]}"; do
+            docker tag "${LOCAL_IMAGE}" "${image}:${tag}"
+            docker push "${image}:${tag}"
+          done
+          printf '%s\n' "${NOTES}" > "${RUNNER_TEMP}/notes.md"
+          gh release create "v${RELEASE}" --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" \
+            --title "v${RELEASE}" --notes-file "${RUNNER_TEMP}/notes.md"
+
+      # The artifact's name tells later runs this build was tested with this release.
+      - name: Upload env reference
+        uses: actions/upload-artifact@v7
+        with:
+          name: env-${{ matrix.branch }}-${{ matrix.build }}-${{ needs.prepare.outputs.release }}
+          path: out/*.json
+          retention-days: 90
+          if-no-files-found: error
+
+  # References only exist for boot tests that passed, so a failed branch leaves the site as it was.
+  # Pages needs a public repository on GitHub's free plan.
+  pages:
+    needs: [test, prepare, build]
+    if: >-
+      always() && github.ref == 'refs/heads/main' && needs.prepare.outputs.public == 'true'
+      && contains(fromJSON('["success", "skipped"]'), needs.test.result)
+      && (github.event_name == 'push' || (needs.prepare.outputs.has_tests == 'true' && needs.build.result != 'cancelled'))
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Download env references
+        uses: actions/download-artifact@v8
+        with:
+          pattern: env-*
+          merge-multiple: true
+          path: _site/env
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v6
+
+      - name: Assemble site
+        run: bash ci/build_site.sh _site "${{ steps.pages.outputs.base_url }}"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+  # GitHub turns off the schedule of a public repository after 60 days without activity, and
+  # enabling the workflow counts as activity.
+  keepalive:
+    needs: prepare
+    if: always() && github.event.schedule == '17 0 * * *' && needs.prepare.outputs.public == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Keep the schedule enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${GITHUB_REPOSITORY}/actions/workflows/docker-image.yml/enable"

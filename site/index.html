@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Garry's Mod server env vars</title>
+  <style>
+    :root {
+      --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --border: #e2e2dc;
+      --accent: #2f6f4e; --code-bg: #f0f0ea;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #161714; --panel: #1f201c; --text: #e8e8e2; --muted: #9a9a92; --border: #33352f;
+        --accent: #7fc39b; --code-bg: #2a2c26;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-padding-top: 112px; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+    main { max-width: 1240px; margin: 0 auto; padding: 24px 16px 64px; }
+    h1 { font-size: 1.4rem; margin: 0 0 4px; }
+    p.lead { color: var(--muted); margin: 0 0 20px; max-width: 760px; }
+    code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.9em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+    .layout { display: grid; gap: 16px; }
+    #toc { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
+    #toc summary { cursor: pointer; font-weight: 600; }
+    #toc ul { list-style: none; margin: 0; padding: 0; }
+    #toc > ul { margin-top: 8px; }
+    #toc ul ul { margin: 2px 0 6px 10px; padding-left: 10px; border-left: 1px solid var(--border); }
+    #toc a { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; color: var(--text); text-decoration: none; font-size: 0.92rem; }
+    #toc > ul > li > a { font-weight: 600; }
+    #toc a:hover { color: var(--accent); }
+    #toc .n { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+    @media (min-width: 960px) {
+      html { scroll-padding-top: 64px; }
+      .layout { grid-template-columns: 230px minmax(0, 1fr); align-items: start; gap: 24px; }
+      #toc { position: sticky; top: 8px; max-height: calc(100vh - 16px); overflow-y: auto; }
+      #toc summary { display: none; }
+      #toc > ul { margin-top: 0; }
+    }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; position: sticky; top: 0; z-index: 1; background: var(--bg); padding: 8px 0; }
+    input, select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; }
+    input { flex: 1 1 260px; min-width: 0; }
+    .count { color: var(--muted); align-self: center; font-size: 0.9rem; }
+    section { margin-bottom: 28px; }
+    h2 { font-size: 1.15rem; margin: 0 0 10px; }
+    h3 { font-size: 1rem; margin: 18px 0 8px; }
+    .file { color: var(--muted); font-weight: 400; font-size: 0.85em; margin-left: 6px; }
+    .row { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px; }
+    .name { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600; color: var(--accent); overflow-wrap: anywhere; cursor: copy; }
+    .desc { color: var(--muted); font-size: 0.92rem; overflow-wrap: anywhere; }
+    .empty, .error { color: var(--muted); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Garry's Mod server env vars</h1>
+  <p class="lead">
+    Every variable the <code>ghcr.io/gameserver-images/garrys-mod</code> image reads, listed from a freshly started server for each game build.
+    <code>CVAR_&lt;name&gt;</code> sets a console variable in <code>server.cfg</code>. Gamemodes and addons add more; <code>docker exec &lt;container&gt; list-env</code> lists them for your own server. Click a name to copy it.
+  </p>
+  <div class="layout">
+    <details id="toc" open>
+      <summary>Contents</summary>
+      <ul id="toc-list"></ul>
+    </details>
+    <div>
+      <div class="controls">
+        <select id="version" aria-label="Game version"></select>
+        <input id="search" type="search" placeholder="Search names and descriptions" aria-label="Search">
+        <span class="count" id="count"></span>
+      </div>
+      <div id="list"></div>
+    </div>
+  </div>
+</main>
+<script>
+  const gamemodeTitles = { sandbox: 'Sandbox gamemode', terrortown: 'TTT gamemode (terrortown)' };
+  const versionSelect = document.getElementById('version');
+  const search = document.getElementById('search');
+  const list = document.getElementById('list');
+  const count = document.getElementById('count');
+  const toc = document.getElementById('toc');
+  const tocList = document.getElementById('toc-list');
+  const wide = matchMedia('(min-width: 960px)');
+  let vars = [];
+
+  // Engine variables are grouped by the part of the name before the first "_" (sv, net, sbox, ...);
+  // prefixes with only a few variables go under Other.
+  function prefixGroups(rows) {
+    const byPrefix = new Map();
+    for (const v of rows) {
+      const name = v.name.slice('CVAR_'.length);
+      const prefix = name.includes('_') ? name.slice(0, name.indexOf('_')).toLowerCase() : '';
+      if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
+      byPrefix.get(prefix).push(v);
+    }
+    const groups = [];
+    const other = [];
+    for (const [prefix, groupRows] of [...byPrefix].sort(([a], [b]) => a.localeCompare(b))) {
+      if (prefix && groupRows.length >= 6) groups.push({ id: `cvar-${prefix}`, title: `${prefix}_`, rows: groupRows });
+      else other.push(...groupRows);
+    }
+    if (other.length) groups.push({ id: 'cvar-other', title: 'Other', rows: other });
+    return groups;
+  }
+
+  function chapters(shown) {
+    const result = [];
+    const image = shown.filter(v => v.kind === 'image');
+    if (image.length) result.push({ id: 'image', title: 'Image settings', file: '', rows: image, groups: [] });
+    const engine = shown.filter(v => v.kind === 'cvar' && !v.gamemode);
+    if (engine.length) result.push({ id: 'cvar', title: 'Console variables', file: 'server.cfg', rows: engine, groups: prefixGroups(engine) });
+    const gamemodes = [...new Set(vars.filter(v => v.gamemode).map(v => v.gamemode))];
+    for (const gamemode of gamemodes) {
+      const rows = shown.filter(v => v.gamemode === gamemode);
+      if (rows.length) result.push({ id: `gamemode-${gamemode}`, title: gamemodeTitles[gamemode] || `${gamemode} gamemode`, file: 'server.cfg', rows, groups: [] });
+    }
+    return result;
+  }
+
+  function tocLink(id, title, n) {
+    const link = document.createElement('a');
+    link.href = `#${id}`;
+    const label = document.createElement('span');
+    label.textContent = title;
+    const number = document.createElement('span');
+    number.className = 'n';
+    number.textContent = n;
+    link.append(label, number);
+    return link;
+  }
+
+  function renderRow(v) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = v.name;
+    name.title = 'Copy';
+    name.addEventListener('click', () => navigator.clipboard?.writeText(v.name));
+    row.append(name);
+    if (v.description) {
+      const desc = document.createElement('div');
+      desc.className = 'desc';
+      desc.textContent = v.description;
+      row.append(desc);
+    }
+    return row;
+  }
+
+  function render() {
+    const query = search.value.trim().toLowerCase();
+    const shown = vars.filter(v => !query || (v.name + ' ' + v.description).toLowerCase().includes(query));
+    count.textContent = `${shown.length} of ${vars.length}`;
+    list.replaceChildren();
+    tocList.replaceChildren();
+    for (const chapter of chapters(shown)) {
+      const section = document.createElement('section');
+      const heading = document.createElement('h2');
+      heading.id = chapter.id;
+      heading.textContent = chapter.title;
+      if (chapter.file) {
+        const file = document.createElement('span');
+        file.className = 'file';
+        file.textContent = chapter.file;
+        heading.append(file);
+      }
+      section.append(heading);
+
+      const item = document.createElement('li');
+      item.append(tocLink(chapter.id, chapter.title, chapter.rows.length));
+      if (chapter.groups.length) {
+        const sublist = document.createElement('ul');
+        for (const group of chapter.groups) {
+          const subheading = document.createElement('h3');
+          subheading.id = group.id;
+          subheading.textContent = group.title;
+          section.append(subheading, ...group.rows.map(renderRow));
+          const subitem = document.createElement('li');
+          subitem.append(tocLink(group.id, group.title, group.rows.length));
+          sublist.append(subitem);
+        }
+        item.append(sublist);
+      } else {
+        section.append(...chapter.rows.map(renderRow));
+      }
+      list.append(section);
+      tocList.append(item);
+    }
+    if (!shown.length) list.innerHTML = '<p class="empty">Nothing matches.</p>';
+  }
+
+  async function loadVersion(file) {
+    list.innerHTML = '<p class="empty">Loading…</p>';
+    try {
+      const response = await fetch(`env/${file}`, { cache: 'no-store' });
+      vars = (await response.json()).vars;
+      render();
+    } catch (error) {
+      list.innerHTML = '<p class="error">Could not load this version.</p>';
+    }
+  }
+
+  async function init() {
+    try {
+      const response = await fetch('env/index.json', { cache: 'no-store' });
+      const files = (await response.json()).files;
+      // Stable (public branch) builds first, newest first.
+      const isStable = f => f.file.startsWith('public-');
+      files.sort((a, b) => isStable(b) - isStable(a) || b.label.localeCompare(a.label, undefined, { numeric: true }));
+      for (const f of files) versionSelect.add(new Option(f.label, f.file));
+      const params = new URLSearchParams(location.search);
+      const wanted = files.find(f => f.file === params.get('version')) || files[0];
+      if (!wanted) {
+        list.innerHTML = '<p class="empty">No versions published yet.</p>';
+        return;
+      }
+      versionSelect.value = wanted.file;
+      search.value = params.get('q') || '';
+      await loadVersion(wanted.file);
+      document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
+    } catch (error) {
+      list.innerHTML = '<p class="error">Could not load the version list.</p>';
+    }
+  }
+
+  // The index is a sidebar on wide screens and a collapsed section above the list on narrow ones.
+  const syncToc = () => { toc.open = wide.matches; };
+  wide.addEventListener('change', syncToc);
+  syncToc();
+  versionSelect.addEventListener('change', () => loadVersion(versionSelect.value));
+  search.addEventListener('input', render);
+  init();
+</script>
+</body>
+</html>

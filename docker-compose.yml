@@ -1,0 +1,17 @@
+services:
+  GarrysModDedicatedServer:
+    image: ghcr.io/gameserver-images/garrys-mod:0.1
+    restart: unless-stopped
+    stop_grace_period: 30s
+    build:
+      context: .
+    env_file:
+      - .env
+    ports:
+      - "27015:27015/udp"
+      - "27015:27015/tcp"
+    volumes:
+      - server:/home/steam/gmod-dedicated
+
+volumes:
+  server:

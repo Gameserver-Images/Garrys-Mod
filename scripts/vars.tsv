@@ -1,0 +1,18 @@
+GAME_BRANCH	Steam branch of the game, installed or updated on every start: public (the stable game, 32-bit, default), x86-64 (64-bit), or another branch listed under "Betas" in Steam.
+GAME_UPDATE	Check Steam for updates of the game and the mounted games on every start (true/false, default true). With false an installed game starts as it is.
+GAME_MOUNTS	Games whose content the server mounts, separated by ';': cstrike (Counter-Strike: Source, which TTT and most gamemodes need), hl2mp (Half-Life 2: Deathmatch), dod (Day of Defeat: Source), tf (Team Fortress 2). Each is installed from its dedicated server into mounts/<name>. Set it empty to mount nothing; unset leaves mount.cfg alone.
+GAMEMODE	Gamemode to run, by its folder name: sandbox (default), terrortown, or one from the workshop collection such as darkrp.
+MAP	Map to start on (default gm_construct). A workshop map has to be in the workshop collection.
+MAXPLAYERS	Player slots (default 16).
+WORKSHOP_COLLECTION	ID of a workshop collection. The server downloads its addons on every start, and players download them when they join.
+STEAM_API_KEY	Steam Web API key, passed as -authkey. Only needed if the server can't download the workshop collection without it.
+STEAM_API_KEY_FILE	File holding the Steam Web API key; takes precedence over STEAM_API_KEY.
+STEAM_GSLT	Game Server Login Token for app 4000 from https://steamcommunity.com/dev/managegameservers, passed as +sv_setsteamaccount. Gives the server a fixed Steam ID instead of a new anonymous one on every start.
+STEAM_GSLT_FILE	File holding the Game Server Login Token; takes precedence over STEAM_GSLT.
+SUPERADMINS	SteamIDs of superadmins, separated by ';', as STEAM_0:1:23, [U:1:47] or 7656119... Written with ADMINS to garrysmod/settings/users.txt whenever either is set.
+ADMINS	SteamIDs of admins, separated by ';', in the same forms as SUPERADMINS.
+CONFIG_STRICT	Refuse to start when a CVAR_ variable matches no console variable of the server, or SUPERADMINS or ADMINS holds something that isn't a SteamID (true/false).
+IP	Address the server binds to.
+PORT	Game port (default 27015): UDP for players and the server browser, TCP for RCON.
+TICKRATE	Server ticks per second (default 66).
+SERVER_ARGS	More srcds command-line options, separated by spaces, for example "-disableluarefresh +sv_lan 0". Quotes are not interpreted.

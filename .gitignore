@@ -1,0 +1,11 @@
+/*
+!/.gitignore
+!/.github/
+!/Dockerfile
+!/LICENSE
+!/README.md
+!/ci/
+!/docker-compose.yml
+!/scripts/
+!/site/
+!/smoke/

@@ -1,0 +1,15 @@
+cvar list
+--------------
+_restart                                 : cmd      :                  : Shutdown and restart the engine.
+gamemode                                 :           0 : , "sv", "nf"     : The gamemode the server runs.
+host_workshop_collection                 :           0 : , "sv"           : Host a workshop collection
+hostname                                 :           0 : , "sv"           : Hostname for server.
+hostport                                 :       27015 : , "sv", "nf"     : Host game server port
+kick                                     : cmd      : , "sv"           : Kick a player by name.
+rcon_password                            :           0 : , "sv", "nolog", "dontrecord" : remote console password.
+sbox_maxprops                            :         200 : , "sv", "rep", "archive" : Maximum props a single player can create
+sv_allowcslua                            :           0 : , "sv", "rep"    : Allow clientside lua scripts to be run
+sv_loadingurl                            :           0 : , "sv"           : URL of the loading screen : shown while joining
+sv_password                              :           0 : , "sv", "nolog", "prot" : Server password for entry into multiplayer games
+--------------
+  11 total convars/concommands
