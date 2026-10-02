@@ -283,7 +283,7 @@ EOF
     sleep 0.1
   done
   port="$(cat "${WORK}/port")"
-  PORT="${port}" bash "${SCRIPT_DIR}/server_info.sh" > "${WORK}/out" 2> "${WORK}/err" || { fail "the query failed"; cat "${WORK}/err" >&2; }
+  IP=127.0.0.1 PORT="${port}" bash "${SCRIPT_DIR}/server_info.sh" > "${WORK}/out" 2> "${WORK}/err" || { fail "the query failed"; cat "${WORK}/err" >&2; }
   expect_eq "$(cat "${WORK}/out")" "name=Boot test & co ✓
 map=gm_construct
 folder=garrysmod
@@ -292,7 +292,8 @@ players=3/16
 bots=1"
   wait
   # Nothing listens on the port any more.
-  PORT="${port}" timeout 5 bash "${SCRIPT_DIR}/server_info.sh" > /dev/null 2>&1 && fail "a query without a server succeeded"
+  IP=127.0.0.1 PORT="${port}" timeout 5 bash "${SCRIPT_DIR}/server_info.sh" > /dev/null 2> "${WORK}/err" && fail "a query without a server succeeded"
+  grep -q "no answer from 127.0.0.1:${port}" "${WORK}/err" || fail "the missing answer was not explained"
 }
 
 test_entry() {

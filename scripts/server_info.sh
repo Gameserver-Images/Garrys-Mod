@@ -4,8 +4,13 @@
 
 set -euo pipefail
 
-host="${IP:-127.0.0.1}"
-[ "${host}" != 0.0.0.0 ] || host=127.0.0.1
+# srcds ignores queries to 127.0.0.1, so without IP this asks the container's own address, or
+# loopback when there's no other.
+host="${IP:-}"
+if [ -z "${host}" ] || [ "${host}" = 0.0.0.0 ]; then
+  host="$(hostname -I | cut -d' ' -f1)"
+  host="${host:-127.0.0.1}"
+fi
 port="${PORT:-27015}"
 # 0xFFFFFFFF, 'T', "Source Engine Query\0"
 query="ffffffff54536f7572636520456e67696e6520517565727900"
@@ -24,8 +29,12 @@ reply="$(exchange "${query}")"
 if [ "${reply:0:10}" = ffffffff41 ]; then
   reply="$(exchange "${query}${reply:10:8}")"
 fi
+if [ -z "${reply}" ]; then
+  echo "Error: no answer from ${host}:${port}" >&2
+  exit 1
+fi
 if [ "${reply:0:10}" != ffffffff49 ]; then
-  echo "Error: unexpected answer from ${host}:${port}" >&2
+  echo "Error: unexpected answer from ${host}:${port}: ${reply:0:80}" >&2
   exit 1
 fi
 

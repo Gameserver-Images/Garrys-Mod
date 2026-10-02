@@ -44,17 +44,30 @@ start_server() {
 }
 
 wait_healthy() {
-  local status=""
+  # The install comes first and can take long; once the server starts, it has 5 minutes.
+  local status="" started=""
   echo "Waiting for the server to answer queries"
-  for _ in $(seq 1 180); do
+  for _ in $(seq 1 240); do
     status="$(docker inspect -f '{{.State.Health.Status}}' "${name}")"
     [ "${status}" = healthy ] && return 0
     [ "$(docker inspect -f '{{.State.Running}}' "${name}")" = true ] || fail "the server exited before it started"
+    if [ -z "${started}" ] && docker logs "${name}" 2>&1 | grep -q '^Server: starting'; then
+      started="${SECONDS}"
+    fi
+    [ -n "${started}" ] && [ $((SECONDS - started)) -gt 300 ] && break
     sleep 5
   done
-  # Which UDP ports are open (hex, in /proc/net/udp) and what the query says.
-  docker exec "${name}" sh -c 'cat /proc/net/udp; server-info' >&2 || true
-  fail "the server did not answer queries within 15 minutes"
+  # The open UDP ports (hex, in /proc/net/udp), and the raw answers on loopback and the container's
+  # own address.
+  docker exec "${name}" bash -c '
+    cat /proc/net/udp
+    for host in 127.0.0.1 $(hostname -I); do
+      exec 3<>"/dev/udp/${host}/${PORT:-27015}"
+      printf "\xff\xff\xff\xffTSource Engine Query\x00" >&3
+      echo "Answer from ${host}: $(timeout 2 dd bs=4096 count=1 status=none <&3 | od -An -v -tx1 | tr -d " \n" | head -c 120)"
+      exec 3<&-
+    done' >&2 || true
+  fail "the server did not answer queries"
 }
 
 wait_cvarlist() {
