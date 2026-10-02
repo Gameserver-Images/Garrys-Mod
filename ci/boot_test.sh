@@ -46,13 +46,15 @@ start_server() {
 wait_healthy() {
   local status=""
   echo "Waiting for the server to answer queries"
-  for _ in $(seq 1 240); do
+  for _ in $(seq 1 180); do
     status="$(docker inspect -f '{{.State.Health.Status}}' "${name}")"
     [ "${status}" = healthy ] && return 0
     [ "$(docker inspect -f '{{.State.Running}}' "${name}")" = true ] || fail "the server exited before it started"
     sleep 5
   done
-  fail "the server did not answer queries within 20 minutes"
+  # Which UDP ports are open (hex, in /proc/net/udp) and what the query says.
+  docker exec "${name}" sh -c 'cat /proc/net/udp; server-info' >&2 || true
+  fail "the server did not answer queries within 15 minutes"
 }
 
 wait_cvarlist() {

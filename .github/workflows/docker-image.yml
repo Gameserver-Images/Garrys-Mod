@@ -186,7 +186,7 @@ jobs:
             cd "${STEAMAPPDIR}" || exit 0
             ls -la . garrysmod steamapps mounts 2>&1
             echo "Libraries the server binaries can not find:"
-            ldd srcds_linux srcds_linux64 bin/*.so bin/*/*.so garrysmod/bin/*.so garrysmod/bin/*/*.so 2>/dev/null | grep "not found" | sort -u'
+            LD_LIBRARY_PATH=.:bin:bin/linux64 ldd srcds_linux srcds_linux64 bin/*.so bin/*/*.so garrysmod/bin/*.so garrysmod/bin/*/*.so 2>/dev/null | grep "not found" | sort -u'
 
       # The cache entry only marks the failure for the next runs; its content doesn't matter.
       - name: Mark the failed build

@@ -39,8 +39,8 @@ server=srcds_run
 [ -f srcds_run_x64 ] && server=srcds_run_x64
 echo "Server: starting ${server} on port ${PORT:-27015} (UDP for players, TCP for RCON)"
 
-# Docker only signals PID 1, so stdin is a FIFO held open here: `console` writes commands into it, and
-# SIGTERM/SIGINT write `quit` so the server shuts down properly.
+# Docker only signals PID 1, so the console is a FIFO held open here: `console` writes commands into
+# it, and SIGTERM/SIGINT write `quit` so the server shuts down properly.
 rm -f "${SERVER_CONSOLE}"
 mkfifo "${SERVER_CONSOLE}"
 exec {CONSOLE_FD}<>"${SERVER_CONSOLE}"
@@ -89,7 +89,10 @@ exec {LOG_FD}> >(
   done
 )
 LOG_PID=$!
-"./${server}" "${ARGS[@]}" <"${SERVER_CONSOLE}" >&"${LOG_FD}" 2>&1 &
+# srcds needs a terminal: it polls stdin expecting one, so a FIFO would block its main loop, and it
+# holds back its output when stdout isn't one. `script` puts it on a pseudo-terminal fed by the FIFO.
+script --quiet --flush --return --echo never --command "$(printf '%q ' "./${server}" "${ARGS[@]}")" /dev/null \
+  <"${SERVER_CONSOLE}" >&"${LOG_FD}" 2>&1 &
 SERVER_PID=$!
 exec {LOG_FD}>&-
 echo "${SERVER_PID}" > "${SERVER_PID_FILE}"

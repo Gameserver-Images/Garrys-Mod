@@ -305,6 +305,8 @@ test_entry() {
   rm -f "${STEAMAPPDIR}/.cvarlist"
   cat > "${STEAMAPPDIR}/srcds_run" <<EOF
 #!/bin/bash
+# The real server blocks on a console that isn't a terminal.
+[ -t 0 ] && [ -t 1 ] || { echo "the console is not a terminal"; exit 3; }
 printf '%s\n' "\$@" > "\${HOMEDIR}/args"
 echo "Loading map gm_construct"
 touch "\${HOMEDIR}/listening"
