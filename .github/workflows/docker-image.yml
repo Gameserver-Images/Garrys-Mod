@@ -2,7 +2,7 @@ name: Build and Publish Docker Image
 
 # Pull requests and pushes run the tests. A push to main whose commits call for a new version
 # (ci/next_release.sh) builds the image, boots it on every Steam branch of the game and publishes it
-# under that version once it boots on the stable game. The image holds no game, so every 6 hours the
+# under that version once it boots on the stable game. The image holds no game, so every hour the
 # newest release is booted on each branch whose Steam build is new to it. Every boot test that
 # passes uploads the env reference for its game build as an artifact, which also marks that build
 # tested, and adds it to the docs site once the repository is public.
@@ -26,7 +26,7 @@ on:
       - 'Dockerfile'
       - '.github/workflows/docker-image.yml'
   schedule:
-    - cron: "17 6,12,18 * * *" # every 6 hours
+    - cron: "17 1-23 * * *" # hourly
     - cron: "17 0 * * *" # daily, which also retries builds that failed
   workflow_dispatch:
 
@@ -75,7 +75,7 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-          RETRY_FAILED: ${{ github.event.schedule != '17 6,12,18 * * *' }}
+          RETRY_FAILED: ${{ github.event.schedule != '17 1-23 * * *' }}
         run: |
           set -euo pipefail
           version=""
@@ -242,6 +242,7 @@ jobs:
       group: pages
       cancel-in-progress: false
     permissions:
+      actions: read
       pages: write
       id-token: write
     environment:
@@ -251,12 +252,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      # Every unexpired reference from any run, oldest first, so the newest release's file for a build
+      # wins. Older ones are carried forward from the live site by build_site.sh.
       - name: Download env references
-        uses: actions/download-artifact@v8
-        with:
-          pattern: env-*
-          merge-multiple: true
-          path: _site/env
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p _site/env
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select((.expired | not) and (.name | startswith("env-"))) | "\(.created_at) \(.id)"' \
+            | sort | while read -r _ id; do
+              gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" > "${RUNNER_TEMP}/reference.zip"
+              unzip -o -q "${RUNNER_TEMP}/reference.zip" -d _site/env
+            done
 
       - name: Configure Pages
         id: pages

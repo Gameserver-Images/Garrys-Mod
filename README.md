@@ -4,7 +4,7 @@ A Docker image for a Garry's Mod dedicated server, configured entirely through e
 
 * The image holds no game. The container installs it from Steam on its first start and updates it on every restart.
 * One image serves every game branch Steam offers: the stable game (32-bit), the 64-bit `x86-64` branch and the betas.
-* `docker exec <container> list-env` lists every variable it reads, with its description and current value.
+* Every variable it reads is listed with its description for each game build at **https://gameserver-images.github.io/Garrys-Mod/**.
 
 ## Quick start
 
@@ -35,7 +35,7 @@ CVAR_sv_password=
 SUPERADMINS=STEAM_0:1:12345678
 ```
 
-The package is private for now, so log in to GHCR first: `docker login ghcr.io` with a token that has `read:packages`. Then run `docker compose up -d`. The first start downloads the game into the `server` volume. The server is up when the container shows as `healthy`, which means it answers the server browser's queries. `docker exec <container> server-info` shows its name, map, gamemode and players.
+Then run `docker compose up -d`. The first start downloads the game into the `server` volume. The server is up when the container shows as `healthy`, which means it answers the server browser's queries. `docker exec <container> server-info` shows its name, map, gamemode and players.
 
 The `server` volume holds the game and everything the server keeps: `garrysmod/data`, `garrysmod/sv.db`, addons, workshop downloads and the config files. Back it up, and don't delete it to fix the game: switching `GAME_BRANCH` and back checks every game file.
 
@@ -43,7 +43,7 @@ The container runs as uid 1000. Named volumes work as they are. A bind-mounted f
 
 ## Configuration
 
-There are two kinds of variables. `docker exec <container> list-env [filter]` lists them for your own server, with your gamemode's and addons' console variables and the values `server.cfg` sets.
+There are two kinds of variables. The [env var site](https://gameserver-images.github.io/Garrys-Mod/) lists every one for each game build. `docker exec <container> list-env [filter]` lists them for your own server, with your gamemode's and addons' console variables and the values `server.cfg` sets.
 
 | Variable | Sets | Example |
 |---|---|---|
@@ -113,7 +113,7 @@ Until 1.0.0, a change that needs you to change your setup comes as a new minor v
 
 The [releases page](https://github.com/Gameserver-Images/Garrys-Mod/releases) says what changed in each version and what to change for a new minor (before 1.0.0) or major version.
 
-CI boots every new version on every Steam branch, with Sandbox and with TTT and Counter-Strike: Source, and only publishes it once it runs on the stable game. It also checks Steam every 6 hours and boots the current version on each new game build.
+CI boots every new version on every Steam branch, with Sandbox and with TTT and Counter-Strike: Source, and only publishes it once it runs on the stable game. It also checks Steam every hour and boots the current version on each new game build.
 
 ## Building the image
 
