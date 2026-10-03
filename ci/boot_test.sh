@@ -11,6 +11,8 @@
 # Usage: boot_test.sh <image> <game branch> <out dir>
 
 set -euo pipefail
+# `docker logs | grep -q` would fail under pipefail: grep stops at the first match and docker logs
+# dies of SIGPIPE. Those checks use grep >/dev/null instead.
 
 image="$1"
 branch="$2"
@@ -51,7 +53,7 @@ wait_healthy() {
     status="$(docker inspect -f '{{.State.Health.Status}}' "${name}")"
     [ "${status}" = healthy ] && return 0
     [ "$(docker inspect -f '{{.State.Running}}' "${name}")" = true ] || fail "the server exited before it started"
-    if [ -z "${started}" ] && docker logs "${name}" 2>&1 | grep -q '^Server: starting'; then
+    if [ -z "${started}" ] && docker logs "${name}" 2>&1 | grep '^Server: starting' >/dev/null; then
       started="${SECONDS}"
     fi
     [ -n "${started}" ] && [ $((SECONDS - started)) -gt 300 ] && break
@@ -73,7 +75,7 @@ wait_healthy() {
 wait_cvarlist() {
   # The server lists its console variables a few seconds after it answers queries.
   for _ in $(seq 1 30); do
-    docker logs "${name}" 2>&1 | grep -q '^Server: listed [0-9]* console variables' && return 0
+    docker logs "${name}" 2>&1 | grep '^Server: listed [0-9]* console variables' >/dev/null && return 0
     sleep 2
   done
   fail "the server did not list its console variables; the log should show what became of the cvarlist output"
@@ -172,7 +174,7 @@ ${output}"
 echo "Start 3: TTT with Counter-Strike: Source mounted"
 start_server -e GAMEMODE=terrortown -e GAME_MOUNTS=cstrike -e CVAR_ttt_preptime_seconds=5
 wait_healthy
-docker logs "${name}" 2>&1 | grep -q '^Mount: cstrike, build [0-9]' || fail "the log does not show the Counter-Strike: Source install"
+docker logs "${name}" 2>&1 | grep '^Mount: cstrike, build [0-9]' >/dev/null || fail "the log does not show the Counter-Strike: Source install"
 gamemode="$(lua 'engine.ActiveGamemode()')"
 expect "the gamemode" "${gamemode}" "terrortown"
 mounted="$(lua 'IsMounted("cstrike")')"
